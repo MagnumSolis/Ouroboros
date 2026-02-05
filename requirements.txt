@@ -1,0 +1,32 @@
+# Core
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Vector Database
+qdrant-client>=1.7.0
+
+# LLM Providers
+groq>=0.4.0
+google-genai>=1.0.0
+cohere>=4.40.0
+
+# Speech-to-Text
+openai-whisper>=20231117
+deepgram-sdk>=3.0.0
+
+# Vision/OCR
+easyocr>=1.7.0
+Pillow>=10.0.0
+
+# Embeddings (local)
+sentence-transformers>=2.2.0
+
+# Dashboard
+streamlit>=1.29.0
+
+# Utilities
+httpx>=0.25.0
+tenacity>=8.2.0
+loguru>=0.7.0
+uuid6>=2024.1.12
