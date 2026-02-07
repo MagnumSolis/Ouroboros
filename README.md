@@ -24,6 +24,11 @@ docker run -p 6333:6333 -p 6334:6334 \
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
 
+# Mac Users (Apple Silicon)
+# If installation fails, use:
+# pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
+
+
 # Install dependencies
 pip install -r requirements.txt
 
