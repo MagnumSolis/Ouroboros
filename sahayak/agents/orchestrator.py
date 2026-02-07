@@ -16,6 +16,8 @@ from loguru import logger
 from .base import BaseAgent, AgentContext, AgentResult, AgentState
 from ..adapters import LLMAdapter
 from ..memory import MemoryManager, MemoryType
+from ..context.master_context import MasterContext
+from ..memory.agent_log import AgentLog
 
 
 ORCHESTRATOR_PROMPT = """You are the Orchestrator Agent for Sahayak - The Vernacular Financial Sentinel.
@@ -89,68 +91,159 @@ class OrchestratorAgent(BaseAgent):
     
     async def process(self, context: AgentContext) -> AgentResult:
         """
-        Main orchestration flow
-        
-        1. Process multimodal input if needed
-        2. Analyze query and create plan
-        3. Execute plan steps
-        4. Synthesize response
-        5. Validate with Critic (if needed)
+        Orchestrate the agent workflow using MasterContext and XML Planning
         """
         self.set_state(AgentState.PROCESSING)
-        
+
         try:
-            # Step 0: Handle multimodal input
+            # 0. Handle multimodal input FIRST (transcribe audio, extract text from images)
             processed_context = await self._handle_multimodal(context)
             
-            # Step 1: Create execution plan
-            plan = await self._create_plan(processed_context)
-            
-            # Log plan to memory
-            await self.log_to_memory(
-                content=f"Plan created: {json.dumps(plan)}",
-                context=processed_context,
-                memory_type=MemoryType.PLAN_STEP,
-                metadata={"plan": plan}
+            # 1. Initialize Master Context with PROCESSED input
+            master_context = MasterContext(
+                interaction_id=processed_context.interaction_id,
+                user_input=processed_context.user_input,
+                language=processed_context.language,
+                modality=processed_context.modality,
+                emotion=processed_context.metadata.get("perception_analysis", {}).get("emotion")
             )
+
+            # 3. Create Execution Plan (XML Blueprint)
+            plan_xml = await self._create_execution_plan(master_context)
+            master_context.execution_plan = plan_xml
             
-            # Step 2: Execute plan
-            results = await self._execute_plan(plan, processed_context)
+            # Log Planning Step
+            log = AgentLog(
+                interaction_id=master_context.interaction_id,
+                agent_id=self.agent_id,
+                action="PLAN",
+                input_summary=master_context.user_input[:50],
+                output_summary="XML Plan Generated",
+                reasoning="Generated plan based on user intent and emotion",
+                confidence=0.9,
+                metadata={"plan": plan_xml}
+            )
+            await self.memory.log_agent_action(log)
+            master_context.add_log(log)
+
+            # 4. Execute Plan (Dynamic Routing)
+            # Parse XML (Simple parsing for demo)
+            steps = []
+            if 'agent="fraud"' in plan_xml: steps.append("fraud")
+            if 'agent="retrieval"' in plan_xml: steps.append("retrieval")
+            if 'agent="critic"' in plan_xml: steps.append("critic")
             
-            # Step 3: Synthesize response
-            response = await self._synthesize_response(processed_context, plan, results)
+            # Default fallback if plan fails
+            if not steps: steps = ["retrieval", "critic"]
             
-            # Step 4: Validate with Critic if needed
-            if plan.get("requires_validation", False) and "critic" in self.agents:
-                response, validation = await self._validate_response(response, results, processed_context)
+            response_text = ""
+            is_fraud = False
+            
+            for step in steps:
+                curr_agent = self.agents.get(step)
+                if not curr_agent: continue
+                
+                # Execute Agent
+                # Note: In a full implementation, we'd pass MasterContext directly
+                # For now, we adapt it to AgentContext to keep existing agents working
+                step_context = AgentContext(
+                    interaction_id=master_context.interaction_id,
+                    user_input=master_context.user_input,
+                    language=master_context.language,
+                    metadata={"master_context": master_context.model_dump()}
+                )
+                
+                result = await curr_agent.process(step_context)
+                
+                # Log Agent Result
+                if result.success:
+                    if step == "fraud":
+                        if result.metadata.get("is_fraud"):
+                            is_fraud = True
+                        master_context.fraud_result = result.metadata
+                    elif step == "retrieval":
+                        response_text = result.content
+                        master_context.retrieval_result = {"content": result.content}
+                    elif step == "critic":
+                        # If critic changes response
+                        if result.content != "VALID" and len(result.content) > 10:
+                            response_text = result.content
+                        master_context.critic_result = {"validation": result.content}
+
+            # 5. Final Response Construction
+            if is_fraud:
+                 final_response = "⚠️ WARNING: This appears to be a fraud attempt. " + response_text
             else:
-                validation = None
+                 final_response = response_text
+
+            master_context.final_response = final_response
             
             self.set_state(AgentState.COMPLETED)
-            
+
             return AgentResult(
                 success=True,
-                content=response,
+                content=final_response,
                 agent_id=self.agent_id,
-                confidence=0.9,
                 metadata={
-                    "plan": plan,
-                    "results_count": len(results),
-                    "validated": validation is not None,
-                    "validation": validation
+                    "plan": plan_xml,
+                    "master_context": master_context.model_dump(), 
+                    "is_fraud": is_fraud
                 }
             )
-            
+
         except Exception as e:
             logger.error(f"Orchestrator error: {e}")
             self.set_state(AgentState.ERROR)
-            
             return AgentResult(
                 success=False,
-                content="I encountered an error processing your request. Please try again.",
+                content=f"Error in processing: {e}",
                 agent_id=self.agent_id,
-                metadata={"error": str(e)}
+                metadata={}
             )
+
+    async def _create_execution_plan(self, context: MasterContext) -> str:
+        """Generate XML blueprint for execution"""
+        prompt = f"""
+        You are the Orchestrator for Sahayak. Create a multi-agent execution plan in XML.
+        
+        User Input: "{context.user_input}"
+        Language: {context.language}
+        Emotion: {context.emotion or 'Neutral'}
+        
+        Available Agents:
+        - perception: (Already run) Handles audio/emotion
+        - fraud: Detects scams, OTP requests, money demands
+        - retrieval: Searches schemes/policies database
+        - critic: Validates answers
+        
+        Rules:
+        1. If input involves MONEY, OTP, KYC, BANK, or FEAR/URGENCY -> Invoke 'fraud' agent FIRST.
+        2. If asking about SCHEMES, LOANS, RULES -> Invoke 'retrieval' agent.
+        3. ALWAYS end with 'critic' agent for safety.
+        
+        Output format (XML ONLY):
+        <plan>
+            <step order="1" agent="fraud" reason="Check for financial risk"/>
+            <step order="2" agent="retrieval" reason="Fetch scheme details"/>
+            <step order="3" agent="critic" reason="Verify info"/>
+        </plan>
+        """
+        
+        # We need to adapt MasterContext to AgentContext for the LLM call
+        temp_context = AgentContext(
+            interaction_id=context.interaction_id,
+            user_input=context.user_input
+        )
+        
+        # LLMAdapter.chat() expects List[ChatMessage]
+        from sahayak.adapters.llm import ChatMessage
+        messages = [ChatMessage(role="user", content=prompt)]
+        
+        llm_response = await self.llm.chat(messages, temperature=0.1)
+        response = llm_response.content
+        # naive cleanup
+        xml = response.replace("```xml", "").replace("```", "").strip()
+        return xml
     
     async def _handle_multimodal(self, context: AgentContext) -> AgentContext:
         """Process audio/image input through Perception agent"""

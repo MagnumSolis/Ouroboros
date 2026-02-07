@@ -25,6 +25,8 @@ from sahayak.agents import (
 )
 from sahayak.adapters.audio_processor import AudioProcessor
 from sahayak.adapters.tts import TTSAdapter
+from sahayak.ui.knowledge_hub import render_knowledge_hub
+from sahayak.ui.trace_viewer import render_reasoning_trace
 
 # Page config
 st.set_page_config(
@@ -206,7 +208,8 @@ async def process_query(system: dict, input_data: any, modality: str = "text", l
         "response": result.content,
         "success": result.success,
         "metadata": result.metadata,
-        "is_fraud": result.metadata.get("plan", {}).get("requires_fraud_check", False)
+        "is_fraud": result.metadata.get("is_fraud", False),
+        "interaction_id": context.interaction_id
     }
 
 
@@ -383,7 +386,8 @@ def render_chat_interface():
                             "role": "assistant",
                             "content": response_text,
                             "is_fraud": is_fraud,
-                            "metadata": metadata
+                            "metadata": metadata,
+                            "interaction_id": result["interaction_id"]
                         }
                         if audio_response:
                              msg_data["audio"] = audio_response
@@ -443,7 +447,7 @@ def main():
     render_sidebar()
     
     # Main content tabs
-    tab1, tab2, tab3 = st.tabs(["💬 Chat", "🤖 Agents", "📊 Blackboard"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["💬 Chat", "🤖 Agents", "📊 Blackboard", "📚 Knowledge Hub", "🧠 Trace"])
     
     with tab1:
         render_demo_queries()
@@ -463,20 +467,55 @@ def main():
     
     with tab3:
         st.markdown("### 🗃️ Memory Blackboard")
-        st.info("Connect to Qdrant to view memory entries")
         
-        # Show collection info
-        cols = st.columns(4)
-        collections = [
-            ("episodic_memory", "🧠", "Interaction logs"),
-            ("knowledge_base", "📚", "Schemes & policies"),
-            ("fraud_patterns", "🔍", "Scam patterns"),
-            ("working_memory", "⚡", "Active tasks"),
-        ]
-        
-        for i, (name, icon, desc) in enumerate(collections):
-            with cols[i]:
-                st.metric(f"{icon} {name.replace('_', ' ').title()}", "0 entries", desc)
+        # Show collection info with live stats
+        if st.session_state.get("system"):
+            memory = st.session_state.system["memory"]
+            try:
+                stats = memory.get_collection_stats()
+                cols = st.columns(4)
+                collections = [
+                    ("episodic_memory", "🧠", "Episodic Memory", "Interaction logs"),
+                    ("knowledge_base", "📚", "Knowledge Base", "Schemes & policies"),
+                    ("fraud_patterns", "🔍", "Fraud Patterns", "Scam patterns"),
+                    ("working_memory", "⚡", "Working Memory", "Active tasks"),
+                ]
+                
+                for i, (name, icon, label, desc) in enumerate(collections):
+                    with cols[i]:
+                        count = stats.get(name, {}).get("points_count", 0)
+                        st.metric(f"{icon} {label}", f"{count} entries")
+                        st.button(f"↑ {desc}", key=f"btn_{name}")
+            except Exception as e:
+                st.error(f"Error fetching stats: {e}")
+        else:
+            st.warning("System not initialized. Please wait...")
+
+    with tab4:
+        if st.session_state.get("system"):
+            render_knowledge_hub(st.session_state.system["memory"])
+        else:
+            st.warning("System not initialized")
+
+    with tab5:
+        messages = st.session_state.messages
+        if messages:
+            # Find last assistant message
+            last_msg = None
+            for msg in reversed(messages):
+                if msg["role"] == "assistant":
+                    last_msg = msg
+                    break
+            
+            if last_msg and "interaction_id" in last_msg:
+                if st.session_state.get("system"):
+                    render_reasoning_trace(st.session_state.system["memory"], last_msg["interaction_id"])
+                else:
+                    st.warning("System initializing...")
+            else:
+                st.info("No traces available yet. Start a conversation.")
+        else:
+            st.info("Start a conversation to see reasoning traces.")
 
 
 if __name__ == "__main__":

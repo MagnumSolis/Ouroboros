@@ -1,0 +1,11 @@
+Reserve Bank - Integrated Ombudsman Scheme, 2021
+        Purpose: Cost-free grievance redressal mechanism for customers of regulated entities (Banks, NBFCs, Payment System Participants).
+        Grounds for complaint:
+        - Non-observance of Fair Practices Code.
+        - Levying of charges without prior notice.
+        - Delay in payment of inward remittances.
+        - Non-adherence to prescribed working hours.
+        - Refusal to open accounts without valid reason.
+        Procedure:
+        - File complaint with the Regulated Entity (Bank/NBFC) first.
+        - If rejected or not replied within 30 days, file with RBI Ombudsman via CMS portal (cms.rbi.org.in).

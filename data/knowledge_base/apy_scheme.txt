@@ -1,0 +1,10 @@
+Atal Pension Yojana (APY)
+        Objective: To provide a defined pension, depending on the contribution, and its period.
+        Eligibility:
+        - Any Citizen of India.
+        - Age between 18 years to 40 years.
+        - Should have a savings bank account/post office savings bank account.
+        Benefits:
+        - Guaranteed minimum pension of Rs. 1000/-, 2000/-, 3000/-, 4000/-, 5000/- per month at the age of 60 years.
+        - The pension is guaranteed by the Government of India.
+        Contribution: Depends on age of entry and pension amount chosen.

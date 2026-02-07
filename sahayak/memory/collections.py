@@ -82,6 +82,16 @@ COLLECTIONS: Dict[str, CollectionConfig] = {
         hnsw_ef_construct=50,
         use_quantization=False,
     ),
+    
+    "semantic_cache": CollectionConfig(
+        name="semantic_cache",
+        description="Cached LLM responses for similar queries",
+        vector_size=384,
+        on_disk=False,     # RAM for fast cache lookup
+        hnsw_m=16,
+        hnsw_ef_construct=100,
+        use_quantization=False,
+    ),
 }
 
 

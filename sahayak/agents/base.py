@@ -12,7 +12,7 @@ import uuid
 from loguru import logger
 
 from ..adapters import LLMAdapter, ChatMessage
-from ..memory import MemoryManager, MemoryEntry, MemoryType
+from ..memory import MemoryManager, MemoryEntry, MemoryType, SemanticCache
 
 
 class AgentState(str, Enum):
@@ -69,6 +69,7 @@ class BaseAgent(ABC):
         self.role = role
         self.llm = llm
         self.memory = memory
+        self.cache = SemanticCache(memory)
         self.system_prompt = system_prompt or self._default_system_prompt()
         self.state = AgentState.IDLE
         
@@ -120,7 +121,16 @@ Always cite sources when providing financial advice."""
         
         messages.append(ChatMessage(role="user", content=prompt))
         
+        # Check cache
+        cached_response = await self.cache.get(prompt)
+        if cached_response:
+            return cached_response
+
         response = await self.llm.chat(messages, **kwargs)
+        
+        # Cache response
+        await self.cache.set(prompt, response.content)
+        
         return response.content
     
     async def log_to_memory(

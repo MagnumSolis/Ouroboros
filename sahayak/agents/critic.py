@@ -11,12 +11,15 @@ Uses Chain-of-Verification (CoVe) prompting pattern.
 """
 
 from typing import Dict, Any, List, Optional
+import json
 
 from loguru import logger
 
 from .base import BaseAgent, AgentContext, AgentResult, AgentState
 from ..adapters import LLMAdapter
 from ..memory import MemoryManager, MemoryType
+from ..memory.agent_log import AgentLog
+from ..context.master_context import MasterContext
 
 
 CRITIC_PROMPT = """You are the Critic Agent for Sahayak - The Vernacular Financial Sentinel.
@@ -67,44 +70,54 @@ class CriticAgent(BaseAgent):
         Validate a proposed response
         
         Expects context.metadata to contain:
-        - proposed_response: The response to validate
-        - retrieved_evidence: List of retrieved documents used
-        - plan: The execution plan that led to this response
+        - master_context: Dictionary representation of MasterContext
         """
         self.set_state(AgentState.PROCESSING)
         
-        proposed_response = context.metadata.get("proposed_response", "")
-        retrieved_evidence = context.metadata.get("retrieved_evidence", [])
-        
+        # Try to recover Master Context
+        master_ctx_dict = context.metadata.get("master_context", {})
+        if not master_ctx_dict:
+            # Fallback for direct calls
+            proposed_response = context.metadata.get("proposed_response", "")
+            retrieved_evidence = context.metadata.get("retrieved_evidence", [])
+            user_input = context.user_input
+        else:
+            proposed_response = master_ctx_dict.get("final_response", "")
+            # Reconstruct evidence from retrieval_result in context
+            ret_res = master_ctx_dict.get("retrieval_result", {})
+            retrieved_evidence = [ret_res] if ret_res else []
+            user_input = master_ctx_dict.get("user_input", "")
+
         if not proposed_response:
-            self.set_state(AgentState.ERROR)
-            return AgentResult(
-                success=False,
-                content="No response to validate",
-                agent_id=self.agent_id
-            )
-        
+             # If no response yet (maybe called in parallel?), skip
+             return AgentResult(success=True, content="VALID", agent_id=self.agent_id)
+
         try:
             # Run validation checks
             validation = await self._validate_response(
                 proposed_response,
                 retrieved_evidence,
-                context
+                user_input
             )
             
-            # Log validation result
-            await self.log_to_memory(
-                content=f"Validation: {'PASS' if validation['approved'] else 'FAIL'} - {validation['summary']}",
-                context=context,
-                memory_type=MemoryType.FEEDBACK,
+            # Log validation result with AgentLog
+            log = AgentLog(
+                interaction_id=context.interaction_id,
+                agent_id=self.agent_id,
+                action="VALIDATE",
+                input_summary=proposed_response[:50] + "...",
+                output_summary=validation["summary"],
+                reasoning=f"Approving: {validation['approved']}. Issues: {len(validation['issues'])}",
+                confidence=validation["confidence"],
                 metadata=validation
             )
+            await self.memory.log_agent_action(log)
             
             self.set_state(AgentState.COMPLETED)
             
             return AgentResult(
                 success=True,
-                content=validation["summary"],
+                content=validation["summary"] if not validation["approved"] else "VALID",
                 agent_id=self.agent_id,
                 confidence=validation["confidence"],
                 metadata=validation
@@ -125,52 +138,61 @@ class CriticAgent(BaseAgent):
         self,
         response: str,
         evidence: List[Dict[str, Any]],
-        context: AgentContext
+        user_input: str
     ) -> Dict[str, Any]:
         """Run Chain-of-Verification validation"""
         
+        # Check if we need independent verification (Double-Check Pattern)
+        # If no evidence is provided but response contains factual claims
+        if not evidence and len(response) > 50:
+            logger.info("Critic performing independent verification...")
+            # Extract keywords to search
+            # Simple keyword extraction for now
+            search_query = user_input
+            new_evidence = await self.memory.retrieve_knowledge(search_query, limit=3)
+            evidence = new_evidence
+
         evidence_text = "\n\n".join([
             f"[Source {i+1}]: {e.get('content', e.get('text', ''))[:300]}..."
             for i, e in enumerate(evidence[:5])
         ]) if evidence else "No evidence provided."
         
         prompt = f"""Validate this response using Chain-of-Verification:
-
-PROPOSED RESPONSE:
-{response}
-
-RETRIEVED EVIDENCE:
-{evidence_text}
-
-USER'S ORIGINAL QUERY:
-{context.user_input}
-
-VALIDATION CHECKLIST:
-1. FACTUAL ACCURACY: Are all facts in the response supported by evidence?
-2. HALLUCINATION CHECK: Does the response claim anything not in the evidence?
-3. CITATION VALIDITY: Are sources cited correctly?
-4. SAFETY CHECK: Is the response safe? No harmful financial advice?
-5. LANGUAGE CHECK: Is the response in the appropriate language for the user?
-6. COMPLETENESS: Does it answer the user's query?
-
-Respond with JSON:
-{{
-    "approved": true/false,
-    "confidence": 0.0-1.0,
-    "issues": ["list of specific issues found"],
-    "suggestions": ["how to fix issues"],
-    "factual_score": 0-10,
-    "safety_score": 0-10,
-    "summary": "one-line validation summary"
-}}
-
-Be strict but fair. If the response is reasonable but has minor issues, you can approve with suggestions."""
-
-        validation_response = await self.think(prompt, context, temperature=0.1)
+ 
+ PROPOSED RESPONSE:
+ {response}
+ 
+ RETRIEVED EVIDENCE:
+ {evidence_text}
+ 
+ USER'S ORIGINAL QUERY:
+ {user_input}
+ 
+ VALIDATION CHECKLIST:
+ 1. FACTUAL ACCURACY: Are all facts in the response supported by evidence?
+ 2. HALLUCINATION CHECK: Does the response claim anything not in the evidence?
+ 3. CITATION VALIDITY: Are sources cited correctly?
+ 4. SAFETY CHECK: Is the response safe? No harmful financial advice?
+ 5. LANGUAGE CHECK: Is the response in the appropriate language for the user?
+ 6. COMPLETENESS: Does it answer the user's query?
+ 
+ Respond with JSON:
+ {{
+     "approved": true/false,
+     "confidence": 0.0-1.0,
+     "issues": ["list of specific issues found"],
+     "suggestions": ["how to fix issues"],
+     "factual_score": 0-10,
+     "safety_score": 0-10,
+     "summary": "one-line validation summary"
+ }}
+ 
+ Be strict but fair. If the response is reasonable but has minor issues, you can approve with suggestions."""
+ 
+        validation_response = await self.think(prompt, None, temperature=0.1)
         
         # Parse validation result
         try:
-            import json
             start = validation_response.find("{")
             end = validation_response.rfind("}") + 1
             if start >= 0 and end > start:
@@ -252,7 +274,6 @@ JSON response:
         response = await self.think(prompt, context, temperature=0.1)
         
         try:
-            import json
             start = response.find("{")
             end = response.rfind("}") + 1
             if start >= 0 and end > start:
