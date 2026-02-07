@@ -14,7 +14,7 @@ from pathlib import Path
 from loguru import logger
 
 from .base import BaseAgent, AgentContext, AgentResult, AgentState
-from ..adapters import LLMAdapter, SpeechAdapter, VisionAdapter, TranscriptionResult
+from ..adapters import LLMAdapter, AudioProcessor, SpeechAdapter, VisionAdapter, TranscriptionResult
 from ..memory import MemoryManager, MemoryType
 
 
@@ -58,6 +58,7 @@ class PerceptionAgent(BaseAgent):
             memory=memory,
             system_prompt=PERCEPTION_PROMPT
         )
+        self.audio_processor = AudioProcessor() # Initialize AudioProcessor
         
         # Lazy initialization of adapters
         self._speech = speech_adapter
@@ -107,51 +108,51 @@ class PerceptionAgent(BaseAgent):
             )
     
     async def _process_audio(self, context: AgentContext) -> AgentResult:
-        """Process audio input - transcription + analysis"""
+        """Process audio input using AudioProcessor"""
         
-        audio_path = context.metadata.get("audio_path")
-        audio_bytes = context.metadata.get("audio_bytes")
+        # In a real scenario, context.user_input would be the audio bytes/file
+        # or a path to the audio file.
         
-        if not audio_path and not audio_bytes:
+        # We assume context.user_input contains the path or bytes
+        audio_data = context.user_input
+        
+        # Process audio
+        try:
+            result = await self.audio_processor.process(audio_data)
+        except Exception as e:
+            logger.error(f"Audio processing failed: {e}")
             return AgentResult(
                 success=False,
-                content="No audio data provided",
+                content=f"Audio processing failed: {str(e)}",
                 agent_id=self.agent_id
             )
         
-        # Transcribe audio
-        transcription: TranscriptionResult = await self.speech.transcribe(
-            audio_path or audio_bytes,
-            language=context.language if context.language != "auto" else None
-        )
-        
-        # Analyze transcription for urgency/sentiment
-        analysis = await self._analyze_voice_content(transcription, context)
-        
         # Log to memory
         await self.log_to_memory(
-            content=f"Audio transcription: {transcription.text[:200]}...",
+            content=f"Audio transcription: {result.text[:200]}...",
             context=context,
             memory_type=MemoryType.USER_INPUT,
             metadata={
-                "transcription_full": transcription.text,
-                "detected_language": transcription.language,
-                "confidence": transcription.confidence,
-                "analysis": analysis,
+                "transcription_full": result.text,
+                "detected_language": result.language,
+                "confidence": result.transcription_confidence,
+                "emotion": result.emotion,
+                "emotion_confidence": result.emotion_confidence,
                 "source_modality": "audio"
             }
         )
         
         return AgentResult(
             success=True,
-            content=transcription.text,
+            content=result.text,
             agent_id=self.agent_id,
-            confidence=transcription.confidence or 0.8,
+            confidence=result.transcription_confidence or 0.8,
             metadata={
-                "transcription": transcription.text,
-                "language": transcription.language,
-                "analysis": analysis,
-                "duration": transcription.duration
+                "transcription": result.text,
+                "language": result.language,
+                "emotion": result.emotion,
+                "emotion_confidence": result.emotion_confidence,
+                "type": "audio_transcription"
             }
         )
     

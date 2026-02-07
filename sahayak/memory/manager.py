@@ -14,6 +14,7 @@ from qdrant_client.models import (
     MatchValue,
     SearchRequest,
     UpdateStatus,
+    QueryResponse,
 )
 from loguru import logger
 
@@ -180,13 +181,13 @@ class MemoryManager:
             qdrant_filter = Filter(must=conditions)
         
         # Search
-        results = self.client.search(
+        results = self.client.query_points(
             collection_name=collection,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit,
             query_filter=qdrant_filter,
             score_threshold=score_threshold,
-        )
+        ).points
         
         return [
             {

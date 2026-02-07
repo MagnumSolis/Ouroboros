@@ -13,6 +13,9 @@ from pathlib import Path
 # Add project to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import nest_asyncio
+nest_asyncio.apply()
+
 from sahayak.config import settings
 from sahayak.adapters import LLMAdapter, EmbeddingAdapter
 from sahayak.memory import MemoryManager
@@ -20,6 +23,8 @@ from sahayak.agents import (
     OrchestratorAgent, RetrievalAgent, FraudAgent, 
     PerceptionAgent, CriticAgent, AgentContext
 )
+from sahayak.adapters.audio_processor import AudioProcessor
+from sahayak.adapters.tts import TTSAdapter
 
 # Page config
 st.set_page_config(
@@ -152,6 +157,8 @@ def initialize_system():
         llm = LLMAdapter()
         embeddings = EmbeddingAdapter()
         memory = MemoryManager(embedding_adapter=embeddings)
+        tts = TTSAdapter()
+        audio_processor = AudioProcessor()
         
         # Initialize agents
         orchestrator = OrchestratorAgent(llm=llm, memory=memory)
@@ -166,6 +173,8 @@ def initialize_system():
         return {
             "llm": llm,
             "memory": memory,
+            "tts": tts,
+            "audio_processor": audio_processor,
             "orchestrator": orchestrator,
             "agents": {
                 "orchestrator": orchestrator,
@@ -180,15 +189,15 @@ def initialize_system():
         return {"status": "error", "error": str(e)}
 
 
-async def process_query(system: dict, query: str, language: str = "hi") -> dict:
-    """Process a user query through the orchestrator"""
+async def process_query(system: dict, input_data: any, modality: str = "text", language: str = "hi") -> dict:
+    """Process a user query (text or audio) through the orchestrator"""
     import uuid
     
     context = AgentContext(
         interaction_id=str(uuid.uuid4()),
-        user_input=query,
+        user_input=input_data, # Can be text or audio bytes
         language=language,
-        modality="text"
+        modality=modality
     )
     
     result = await system["orchestrator"].process(context)
@@ -293,16 +302,37 @@ def render_chat_interface():
         with st.chat_message(msg["role"]):
             if msg["role"] == "assistant" and msg.get("is_fraud"):
                 st.markdown(f'<div class="fraud-alert">⚠️ FRAUD ALERT DETECTED</div>', unsafe_allow_html=True)
+            
             st.markdown(msg["content"])
+            
+            # Show audio if available
+            if msg.get("audio"):
+                st.audio(msg["audio"], format="audio/mp3")
+            
+            # Show metadata (emotion etc)
+            if msg.get("metadata"):
+                meta = msg["metadata"]
+                if "emotion" in meta:
+                    st.caption(f"🎭 Emotion: {meta['emotion']} | Confidence: {meta.get('emotion_confidence', 0):.2f}")
     
-    # Chat input
-    if prompt := st.chat_input("आपका प्रश्न / Your question..."):
+    # Audio Input
+    audio_val = st.audio_input("🎤 Speak now / बोलें")
+    
+    # Text Input
+    prompt = st.chat_input("आपका प्रश्न / Your question...")
+    
+    if prompt or audio_val:
+        # Determine input type
+        user_content = prompt if prompt else "🎤 Audio Message"
+        input_data = prompt if prompt else audio_val
+        modality = "text" if prompt else "audio"
+
         # Add user message
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.messages.append({"role": "user", "content": user_content})
         st.session_state.interaction_count += 1
         
         with st.chat_message("user"):
-            st.markdown(prompt)
+            st.markdown(user_content)
         
         # Process with orchestrator
         with st.chat_message("assistant"):
@@ -311,26 +341,54 @@ def render_chat_interface():
                 
                 if system.get("status") == "online":
                     try:
-                        result = asyncio.run(process_query(
+                        # Use existing loop instead of asyncio.run which closes it
+                        loop = asyncio.get_event_loop()
+                        
+                        # Process Query
+                        result = loop.run_until_complete(process_query(
                             system, 
-                            prompt,
-                            st.session_state.get("language", "hi")
+                            input_data,
+                            modality=modality,
+                            language=st.session_state.get("language", "hi")
                         ))
                         
-                        response = result["response"]
+                        response_text = result["response"]
                         is_fraud = result.get("is_fraud", False)
+                        metadata = result.get("metadata", {})
                         
+                        # Generate Audio Response (TTS)
+                        audio_response = None
+                        if system.get("tts"):
+                            try:
+                                audio_response = loop.run_until_complete(
+                                    system["tts"].synthesize(response_text)
+                                )
+                            except Exception as e:
+                                print(f"TTS Failed: {e}")
+
                         if is_fraud:
                             st.session_state.fraud_alerts += 1
                             st.markdown(f'<div class="fraud-alert">⚠️ संभावित धोखाधड़ी / Potential Fraud Detected</div>', unsafe_allow_html=True)
                         
-                        st.markdown(response)
+                        st.markdown(response_text)
                         
-                        st.session_state.messages.append({
+                        if audio_response:
+                            st.audio(audio_response, format="audio/mp3")
+                            
+                        if "emotion" in metadata:
+                             st.caption(f"🎭 Detected Emotion: {metadata['emotion']} (Conf: {metadata.get('emotion_confidence', 0):.2f})")
+                        
+                        # Save to history
+                        msg_data = {
                             "role": "assistant",
-                            "content": response,
-                            "is_fraud": is_fraud
-                        })
+                            "content": response_text,
+                            "is_fraud": is_fraud,
+                            "metadata": metadata
+                        }
+                        if audio_response:
+                             msg_data["audio"] = audio_response
+                             
+                        st.session_state.messages.append(msg_data)
                         
                     except Exception as e:
                         error_msg = f"Error processing request: {str(e)}"

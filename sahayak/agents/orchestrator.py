@@ -189,9 +189,11 @@ class OrchestratorAgent(BaseAgent):
 User Query: {context.user_input}
 Detected Language: {context.language}
 Input Type: {context.modality}
-Additional Context: {json.dumps(context.metadata.get('perception_analysis', {}), default=str)[:200]}
+Additional Context: {json.dumps(context.metadata.get('perception_analysis', {}), default=str)[:300]}
+Emotion Analysis: {context.metadata.get('perception_analysis', {}).get('emotion', 'unknown')} (conf: {context.metadata.get('perception_analysis', {}).get('emotion_confidence', 0):.2f})
 
-Create a JSON plan as specified. Be strategic about which agents to invoke."""
+Create a JSON plan as specified. Be strategic about which agents to invoke.
+If emotion is 'fear' or 'angry', prioritize CHECK_FRAUD and raise urgency."""
 
         response = await self.think(prompt, context, temperature=0.3)
         
