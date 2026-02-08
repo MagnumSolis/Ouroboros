@@ -23,6 +23,7 @@ load_dotenv()
 from src.adapters import LLMAdapter, EmbeddingAdapter
 from src.memory import MemoryManager
 from src.agents import OrchestratorAgent, RetrievalAgent, FraudAgent
+from src.agents.base import AgentContext
 from loguru import logger
 
 
@@ -74,18 +75,21 @@ async def demo_no_hallucination():
     # Get orchestrator response
     print("\n🤖 Orchestrator Response:")
     print("-" * 70)
-    result_before = await orchestrator.process(
+    context_before = AgentContext(
         user_input=test_query,
         language="en"
     )
-    print(result_before["response"])
+    result_before = await orchestrator.process(context_before)
+    response_before = result_before.content
+    print(response_before)
     print("-" * 70)
     
     # Highlight honesty
-    if "don't have" in result_before["response"].lower() or \
-       "no information" in result_before["response"].lower() or \
-       "cannot find" in result_before["response"].lower() or \
-       "insufficient" in result_before["response"].lower():
+    if "don't have" in response_before.lower() or \
+       "no information" in response_before.lower() or \
+       "cannot find" in response_before.lower() or \
+       "insufficient" in response_before.lower() or \
+       "no specific" in response_before.lower():
         print("\n✅ IMPORTANT: System ADMITS it lacks data (NO HALLUCINATION)")
     else:
         print("\n⚠️  Note: Check if response indicates lack of data")
@@ -162,16 +166,18 @@ async def demo_no_hallucination():
     
     print("\n🤖 Orchestrator Response:")
     print("-" * 70)
-    result_after = await orchestrator.process(
+    context_after = AgentContext(
         user_input=test_query,
         language="en"
     )
-    print(result_after["response"])
+    result_after = await orchestrator.process(context_after)
+    response_after = result_after.content
+    print(response_after)
     print("-" * 70)
     
     # Highlight source attribution
-    if "ayushman" in result_after["response"].lower() and \
-       ("lakh" in result_after["response"].lower() or "5" in result_after["response"]):
+    if "ayushman" in response_after.lower() and \
+       ("lakh" in response_after.lower() or "5" in response_after):
         print("\n✅ IMPORTANT: System now provides ACCURATE information with SOURCES")
     
     # Summary
