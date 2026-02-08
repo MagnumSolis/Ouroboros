@@ -167,6 +167,7 @@ sahayak/
 
 -   **"Collection 'semantic_cache' doesn't exist"**: Run `python scripts/setup_qdrant.py` to initialize the collections.
 -   **Detailed Logs**: Check the terminal output for INFO/DEBUG logs to trace agent activities.
+-   **"zsh: command not found: docker"**: You do not have Docker installed. Download "Docker Desktop" from [docker.com](https://www.docker.com/products/docker-desktop/) and start the application before running the command.
 -   **Docker Connection Error**: Ensure Docker Desktop is running and port 6333 is not blocked.
 
 ---
