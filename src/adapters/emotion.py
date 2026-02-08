@@ -8,7 +8,7 @@ from loguru import logger
 # Check for transformers availability
 try:
     import torch
-    from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForSequenceClassification
+    from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForSequenceClassification, pipeline
     import librosa
     HF_AVAILABLE = True
 except ImportError:
@@ -20,28 +20,31 @@ class EmotionAdapter:
     """
     Speech Emotion Recognition (SER) Adapter
     
-    Uses pre-trained Wav2Vec2 model from Hugging Face for emotion detection.
-    Model: r-f/wav2vec-english-speech-emotion-recognition
+    Uses pre-trained model from Hugging Face for emotion detection.
+    Default: superb/wav2vec2-base-superb-er (~360MB, fast download)
     
-    Emotions: angry, calm, disgust, fear, happy, neutral, sad, surprise
+    Emotions: neu (neutral), hap (happy), ang (angry), sad
     """
     
-    # Emotion labels from the pretrained model
-    EMOTIONS = ['angry', 'calm', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+    # Emotion labels - will be updated from model config
+    EMOTIONS = ['neutral', 'happy', 'angry', 'sad']
     
-    # Map to simplified emotions for the system
-    EMOTION_MAP = {
-        'angry': 'angry',
-        'calm': 'calm',
-        'disgust': 'disgust',
-        'fear': 'fear',
-        'happy': 'happy',
-        'neutral': 'neutral',
+    # Map model labels to readable names
+    LABEL_MAP = {
+        'neu': 'neutral',
+        'hap': 'happy', 
+        'ang': 'angry',
         'sad': 'sad',
-        'surprise': 'surprise'
+        'neutral': 'neutral',
+        'happy': 'happy',
+        'angry': 'angry',
+        'fear': 'fear',
+        'disgust': 'disgust',
+        'surprise': 'surprise',
+        'calm': 'calm'
     }
     
-    def __init__(self, model_name: str = "r-f/wav2vec-english-speech-emotion-recognition"):
+    def __init__(self, model_name: str = "superb/wav2vec2-base-superb-er"):
         """
         Initialize the emotion adapter with a pre-trained HuggingFace model.
         
@@ -155,9 +158,9 @@ class EmotionAdapter:
             confidence = float(probs_np[predicted_idx])
             
             return {
-                "emotion": emotion,
+                "emotion": self.LABEL_MAP.get(emotion, emotion),
                 "confidence": confidence,
-                "all_scores": {e: float(s) for e, s in zip(self.EMOTIONS, probs_np)},
+                "all_scores": {self.LABEL_MAP.get(e, e): float(s) for e, s in zip(self.EMOTIONS, probs_np)},
                 "model": self.model_name
             }
             
