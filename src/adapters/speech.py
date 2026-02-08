@@ -51,8 +51,10 @@ class DeepgramProvider(BaseSpeechProvider):
     def __init__(self, api_key: str):
         try:
             from deepgram import DeepgramClient
-            # Note: Using older SDK version without DeepgramClientOptions
-            self.client = DeepgramClient(api_key)
+            # Fix: Pass api_key as keyword argument to avoid positional arg error
+            self.client = DeepgramClient(api_key=api_key)
+        except ImportError as e:
+            raise ImportError(f"Deepgram SDK not installed or incompatible: {e}")
         except Exception as e:
             raise ImportError(f"Failed to initialize Deepgram: {e}")
     
@@ -61,16 +63,6 @@ class DeepgramProvider(BaseSpeechProvider):
         audio: Union[str, Path, bytes, BinaryIO],
         language: Optional[str] = None
     ) -> TranscriptionResult:
-        from deepgram import PrerecordedOptions, FileSource
-        
-        options = PrerecordedOptions(
-            model="nova-2",
-            smart_format=True,
-            language=language or "hi",  # Default Hindi
-            detect_language=language is None,
-            punctuate=True,
-        )
-        
         # Handle different audio input types
         if isinstance(audio, (str, Path)):
             with open(audio, "rb") as f:
@@ -80,12 +72,16 @@ class DeepgramProvider(BaseSpeechProvider):
         else:
             audio_data = audio.read()
         
-        payload: FileSource = {"buffer": audio_data}
-        
+        # Use key-value arguments instead of Options object for latest SDK
+        # Note: 'request' argument expects the audio bytes directly
         response = await asyncio.to_thread(
-            self.client.listen.prerecorded.v("1").transcribe_file,
-            payload,
-            options
+            self.client.listen.v1.media.transcribe_file,
+            request=audio_data,
+            model="nova-2",
+            smart_format=True,
+            language=language or "hi",  # Default Hindi
+            detect_language=language is None,
+            punctuate=True,
         )
         
         result = response.results.channels[0].alternatives[0]

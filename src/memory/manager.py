@@ -499,6 +499,87 @@ class MemoryManager:
         logger.warning(f"Cleared collection: {collection}")
         return True
 
+    async def ingest_file(
+        self,
+        file_path: str,
+        collection_name: str = "knowledge_base",
+        metadata: Optional[Dict[str, Any]] = None,
+        chunk_size: int = 500,
+        overlap: int = 50
+    ) -> bool:
+        """
+        Ingest a file (PDF/TXT) into the knowledge base with chunking.
+        
+        Args:
+            file_path: Path to the file
+            collection_name: Target collection
+            metadata: Additional metadata to attach
+            chunk_size: Characters per chunk
+            overlap: Overlap between chunks
+        """
+        try:
+            logger.info(f"Ingesting file: {file_path}")
+            content = ""
+            
+            # 1. Read file
+            if file_path.endswith(".pdf"):
+                if pypdf:
+                    with open(file_path, "rb") as f:
+                        reader = pypdf.PdfReader(f)
+                        for page in reader.pages:
+                            content += page.extract_text() + "\n"
+                else:
+                    logger.error("pypdf not installed. Cannot read PDF.")
+                    return False
+            else:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            
+            if not content:
+                logger.warning(f"File {file_path} is empty or could not be read")
+                return False
+                
+            # 2. Chunk content
+            chunks = []
+            for i in range(0, len(content), chunk_size - overlap):
+                chunk = content[i:i + chunk_size]
+                if len(chunk) > 50:  # Ignore tiny chunks
+                    chunks.append(chunk)
+            
+            logger.info(f"Split {file_path} into {len(chunks)} chunks")
+            
+            # 3. Store chunks
+            for i, chunk in enumerate(chunks):
+                doc_meta = {
+                    **(metadata or {}),
+                    "chunk_index": i,
+                    "total_chunks": len(chunks),
+                    "source_path": file_path
+                }
+                
+                # Create KnowledgeDocument
+                doc_id = str(uuid.uuid4())
+                
+                # Embed and store
+                vector = await self.embedder.embed_query(chunk)
+                
+                self.client.upsert(
+                    collection_name=collection_name,
+                    points=[
+                        PointStruct(
+                            id=doc_id,
+                            vector=vector,
+                            payload={**doc_meta, "content": chunk}
+                        )
+                    ]
+                )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error ingesting file {file_path}: {e}")
+            return False
+
     # =========================================================================
     # Agent Communication Logging (Phase 1)
     # =========================================================================

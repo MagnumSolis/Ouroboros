@@ -21,6 +21,13 @@ class AgentLog(BaseModel):
     reasoning: str
     confidence: float
     
+    # NEW: Priority for jury demo visibility
+    priority: str = "LOW"  # LOW, MEDIUM, HIGH, CRITICAL
+    is_critical: bool = False  # Flag for OTP/fraud alerts
+    
+    # NEW: Sentiment tracking
+    user_sentiment: Optional[str] = None  # happy, anxious, confused, neutral
+    
     next_agent: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     
