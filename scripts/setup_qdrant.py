@@ -12,8 +12,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from qdrant_client import QdrantClient
-from sahayak.config import settings
-from sahayak.memory.collections import COLLECTIONS, get_vector_params
+from src.config import settings
+from src.memory.collections import COLLECTIONS, get_vector_params
 
 
 def setup_collections():

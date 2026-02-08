@@ -5,6 +5,7 @@ Memory Manager - Qdrant Blackboard for agent communication
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 import uuid
+import os
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -15,12 +16,23 @@ from qdrant_client.models import (
     SearchRequest,
     UpdateStatus,
     QueryResponse,
+    RecommendQuery,
+    RecommendInput,
+    RecommendStrategy,
+    DiscoverQuery,
+    DiscoverInput,
+    ContextPair,
 )
 from loguru import logger
+try:
+    import pypdf
+except ImportError:
+    pypdf = None
 
 from ..config import settings
 from ..adapters.embeddings import EmbeddingAdapter
 from .schemas import MemoryEntry, MemoryType, FraudPattern, KnowledgeDocument, WorkingMemoryEntry
+from .agent_log import AgentLog
 from .collections import COLLECTIONS, get_vector_params, CollectionConfig
 
 
@@ -93,7 +105,11 @@ class MemoryManager:
     
     def _ensure_collections(self):
         """Create collections if they don't exist"""
+        from qdrant_client.models import PayloadSchemaType
+        
         existing = {c.name for c in self.client.get_collections().collections}
+        
+        logger.debug(f"Ensuring collections for: {list(COLLECTIONS.keys())}")
         
         for name, config in COLLECTIONS.items():
             if name not in existing:
@@ -104,6 +120,29 @@ class MemoryManager:
                 logger.info(f"Created collection: {name}")
             else:
                 logger.debug(f"Collection exists: {name}")
+        
+        # Create payload indexes for filtering (required by Qdrant)
+        try:
+            # Index for agent trace retrieval
+            self.client.create_payload_index(
+                collection_name="working_memory",
+                field_name="interaction_id",
+                field_schema=PayloadSchemaType.KEYWORD
+            )
+            logger.debug("Created index: working_memory.interaction_id")
+        except Exception as e:
+            logger.debug(f"Index may already exist: {e}")
+            
+        try:
+            # Index for language filtering in knowledge base
+            self.client.create_payload_index(
+                collection_name="knowledge_base",
+                field_name="language",
+                field_schema=PayloadSchemaType.KEYWORD
+            )
+            logger.debug("Created index: knowledge_base.language")
+        except Exception as e:
+            logger.debug(f"Index may already exist: {e}")
     
     # =========================================================================
     # Core Operations
@@ -131,7 +170,7 @@ class MemoryManager:
         doc_id = id or str(uuid.uuid4())
         
         # Generate embedding
-        vector = await self.embedder.embed_single(content)
+        vector = await self.embedder.embed_query(content)
         
         # Store in Qdrant
         self.client.upsert(
@@ -197,6 +236,88 @@ class MemoryManager:
             }
             for hit in results
         ]
+        
+    async def recommend_similar(
+        self,
+        collection: str,
+        positive_ids: List[str],
+        negative_ids: List[str] = [],
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Recommend similar items using Qdrant Recommendation API
+        Useful for: "Show me schemes similar to PMJDY"
+        """
+        try:
+            results = self.client.query_points(
+                collection_name=collection,
+                query=RecommendQuery(
+                    recommend=RecommendInput(
+                        positive=positive_ids,
+                        negative=negative_ids,
+                        strategy=RecommendStrategy.AVERAGE_VECTOR,
+                    )
+                ),
+                limit=limit,
+            ).points
+            
+            return [
+                {
+                    "id": hit.id,
+                    "score": hit.score,
+                    **hit.payload
+                }
+                for hit in results
+            ]
+        except Exception as e:
+            logger.error(f"Recommendation failed: {e}")
+            return []
+
+    async def discover_patterns(
+        self,
+        collection: str,
+        target_text: str,
+        positive_context_text: str,
+        negative_context_text: str,
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Explore patterns using Qdrant Discovery API
+        Useful for: "Find fraud patterns like 'OTP' but not 'Lottery'"
+        """
+        try:
+            # Embed all components
+            target_vector = await self.embedder.embed_query(target_text)
+            pos_vector = await self.embedder.embed_query(positive_context_text)
+            neg_vector = await self.embedder.embed_query(negative_context_text)
+            
+            results = self.client.query_points(
+                collection_name=collection,
+                query=DiscoverQuery(
+                    discover=DiscoverInput(
+                        target=target_vector,
+                        context=[
+                            ContextPair(
+                                positive=pos_vector,
+                                negative=neg_vector
+                            )
+                        ]
+                    )
+                ),
+                limit=limit,
+            ).points
+            
+            return [
+                {
+                    "id": hit.id,
+                    "score": hit.score,
+                    **hit.payload
+                }
+                for hit in results
+            ]
+        except Exception as e:
+            logger.error(f"Discovery search failed: {e}")
+            return []
     
     async def get_by_id(
         self,
@@ -377,3 +498,62 @@ class MemoryManager:
         )
         logger.warning(f"Cleared collection: {collection}")
         return True
+
+    # =========================================================================
+    # Agent Communication Logging (Phase 1)
+    # =========================================================================
+
+    async def log_agent_action(self, log: AgentLog) -> str:
+        """Log an agent's action and reasoning to working memory"""
+        # Create a searchable representation: "Agent ACTION on INPUT resulted in OUTPUT because REASONING"
+        content = f"{log.agent_id} {log.action}: {log.input_summary} -> {log.output_summary} | {log.reasoning}"
+        
+        return await self.store(
+            collection="working_memory",
+            content=content,
+            payload=log.model_dump(),
+            id=log.id
+        )
+
+    async def get_agent_trace(self, interaction_id: str) -> List[AgentLog]:
+        """Retrieve the full execution trace for an interaction using scroll API"""
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        
+        try:
+            # Use scroll with filter - doesn't require index like search does
+            scroll_filter = Filter(
+                must=[
+                    FieldCondition(
+                        key="interaction_id",
+                        match=MatchValue(value=interaction_id)
+                    )
+                ]
+            )
+            
+            results, _ = self.client.scroll(
+                collection_name="working_memory",
+                scroll_filter=scroll_filter,
+                limit=50,
+                with_payload=True
+            )
+            
+            logs = []
+            for point in results:
+                try:
+                    payload = point.payload
+                    if payload:
+                        logs.append(AgentLog(**payload))
+                except Exception as e:
+                    logger.warning(f"Failed to parse agent log: {e}")
+            
+            # Sort by timestamp
+            logs.sort(key=lambda x: x.timestamp)
+            return logs
+            
+        except Exception as e:
+            logger.warning(f"Error fetching agent trace: {e}")
+            return []
+        
+        # Sort by timestamp
+        logs.sort(key=lambda x: x.timestamp)
+        return logs

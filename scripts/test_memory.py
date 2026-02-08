@@ -10,8 +10,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 load_dotenv()
 
-from sahayak.memory import MemoryManager
-from sahayak.config import settings
+from src.memory import MemoryManager
+from src.config import settings
 
 async def test_memory_manager():
     print("\n" + "=" * 50)

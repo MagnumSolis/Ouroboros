@@ -3,7 +3,7 @@ Base Agent - Foundation for all Sahayak agents
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -12,7 +12,7 @@ import uuid
 from loguru import logger
 
 from ..adapters import LLMAdapter, ChatMessage
-from ..memory import MemoryManager, MemoryEntry, MemoryType
+from ..memory import MemoryManager, MemoryEntry, MemoryType, SemanticCache
 
 
 class AgentState(str, Enum):
@@ -28,7 +28,7 @@ class AgentState(str, Enum):
 class AgentContext:
     """Context passed between agents"""
     interaction_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    user_input: str = ""
+    user_input: Union[str, bytes] = ""  # str for text, bytes for audio/image
     language: str = "en"
     modality: str = "text"  # text, audio, image
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -69,6 +69,7 @@ class BaseAgent(ABC):
         self.role = role
         self.llm = llm
         self.memory = memory
+        self.cache = SemanticCache(memory)
         self.system_prompt = system_prompt or self._default_system_prompt()
         self.state = AgentState.IDLE
         
@@ -120,7 +121,16 @@ Always cite sources when providing financial advice."""
         
         messages.append(ChatMessage(role="user", content=prompt))
         
+        # Check cache
+        cached_response = await self.cache.get(prompt)
+        if cached_response:
+            return cached_response
+
         response = await self.llm.chat(messages, **kwargs)
+        
+        # Cache response
+        await self.cache.set(prompt, response.content)
+        
         return response.content
     
     async def log_to_memory(

@@ -1,0 +1,9 @@
+Pradhan Mantri Mudra Yojana (PMMY)
+        Objective: To provide funding to the non-corporate, non-farm small/micro enterprises.
+        Categories:
+        1. Shishu: Loans up to Rs. 50,000/-
+        2. Kishore: Loans above Rs. 50,000/- and up to Rs. 5 lakh
+        3. Tarun: Loans above Rs. 5 lakh and up to Rs. 10 lakh
+        Purpose: Business loan for vendors, traders, shopkeepers and other service sector activities.
+        Collateral: No collateral required.
+        Processing Fee: Nil for Shishu and Kishore.
