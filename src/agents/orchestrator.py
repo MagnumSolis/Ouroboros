@@ -112,6 +112,15 @@ class OrchestratorAgent(BaseAgent):
             plan_xml = await self._create_execution_plan(master_context)
             master_context.execution_plan = plan_xml
             
+            # Parse simple attributes from plan (regex for speed)
+            import re
+            priority_match = re.search(r'priority="([^"]+)"', plan_xml)
+            sentiment_match = re.search(r'sentiment="([^"]+)"', plan_xml)
+            
+            priority = priority_match.group(1) if priority_match else "LOW"
+            sentiment = sentiment_match.group(1) if sentiment_match else (master_context.emotion or "neutral")
+            is_critical = priority == "CRITICAL"
+
             # Log Planning Step
             log = AgentLog(
                 interaction_id=master_context.interaction_id,
@@ -119,8 +128,11 @@ class OrchestratorAgent(BaseAgent):
                 action="PLAN",
                 input_summary=master_context.user_input[:50],
                 output_summary="XML Plan Generated",
-                reasoning="Generated plan based on user intent and emotion",
+                reasoning=f"Planned for {priority} priority with {sentiment} sentiment",
                 confidence=0.9,
+                priority=priority,
+                is_critical=is_critical,
+                user_sentiment=sentiment,
                 metadata={"plan": plan_xml}
             )
             await self.memory.log_agent_action(log)
@@ -203,12 +215,32 @@ class OrchestratorAgent(BaseAgent):
 
     async def _create_execution_plan(self, context: MasterContext) -> str:
         """Generate XML blueprint for execution"""
+        # Detect user sentiment for response adaptation
+        sentiment = context.emotion or "neutral"
+        if not context.emotion:
+             # Simple keyword based sentiment fallback if perception didn't catch it
+             lower_input = context.user_input.lower()
+             if any(w in lower_input for w in ["scam", "cheat", "lost", "stole", "fear", "afraid"]):
+                 sentiment = "anxious"
+             elif any(w in lower_input for w in ["thank", "good", "great"]):
+                 sentiment = "happy"
+
+        # Set priority based on keywords
+        priority = "LOW"
+        is_critical = False
+        if any(kw in context.user_input.lower() for kw in ["otp", "kyc", "urgent", "bank", "money", "password"]):
+            priority = "HIGH"
+            if "otp" in context.user_input.lower() or "cvv" in context.user_input.lower():
+                priority = "CRITICAL"
+                is_critical = True
+
         prompt = f"""
         You are the Orchestrator for Sahayak. Create a multi-agent execution plan in XML.
         
         User Input: "{context.user_input}"
         Language: {context.language}
-        Emotion: {context.emotion or 'Neutral'}
+        Emotion: {sentiment}
+        Priority: {priority}
         
         Available Agents:
         - perception: (Already run) Handles audio/emotion
@@ -217,12 +249,12 @@ class OrchestratorAgent(BaseAgent):
         - critic: Validates answers
         
         Rules:
-        1. If input involves MONEY, OTP, KYC, BANK, or FEAR/URGENCY -> Invoke 'fraud' agent FIRST.
+        1. If input involves MONEY, OTP, KYC, BANK, or FEAR/URGENCY -> Invoke 'fraud' agent FIRST with priority={priority}.
         2. If asking about SCHEMES, LOANS, RULES -> Invoke 'retrieval' agent.
         3. ALWAYS end with 'critic' agent for safety.
         
         Output format (XML ONLY):
-        <plan>
+        <plan sentiment="{sentiment}" priority="{priority}">
             <step order="1" agent="fraud" reason="Check for financial risk"/>
             <step order="2" agent="retrieval" reason="Fetch scheme details"/>
             <step order="3" agent="critic" reason="Verify info"/>

@@ -27,7 +27,8 @@ class EmotionAdapter:
             self.load_weights(model_path)
             logger.info(f"✅ Loaded Emotion Model from {model_path}")
         else:
-            logger.warning("⚠️ No pre-trained emotion model found. Using initialized weights (random).")
+            # Downgrade to INFO as this is expected behavior for now
+            logger.info("ℹ️ No pre-trained emotion model found. Using initialized weights (Simulation Mode).")
 
     def _build_model(self):
         """

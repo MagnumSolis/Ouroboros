@@ -32,8 +32,8 @@ def render_knowledge_hub(memory):
                     with open(temp_path, "wb") as f:
                         f.write(file.getbuffer())
                     
-                    # Ingest
-                    meta = {"source": "upload", "original_name": file.name}
+                    # Ingest with language metadata (enables optional language filtering in future)
+                    meta = {"source": "upload", "original_name": file.name, "language": "multi"}
                     
                     # We need to run async ingest in sync streamlit
                     import asyncio
@@ -62,7 +62,8 @@ def render_knowledge_hub(memory):
              
              if st.button("🔄 Re-seed Defaults"):
                  import subprocess
-                 subprocess.Popen(["python3", "scripts/seed_knowledge.py"])
+                 import sys
+                 subprocess.Popen([sys.executable, "scripts/ingest_knowledge.py"])
                  st.info("Seeding started in background...")
                  
         except Exception as e:

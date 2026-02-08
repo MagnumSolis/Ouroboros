@@ -27,6 +27,7 @@ from src.adapters.audio_processor import AudioProcessor
 from src.adapters.tts import TTSAdapter
 from src.ui.knowledge_hub import render_knowledge_hub
 from src.ui.trace_viewer import render_reasoning_trace
+from src.ui.pipeline_viewer import render_pipeline_viewer
 
 # Page config
 st.set_page_config(
@@ -264,9 +265,26 @@ def render_sidebar():
             st.markdown("#### Agent Status")
             agents = system.get("agents", {})
             for name, agent in agents.items():
-                state = getattr(agent, 'state', 'IDLE')
-                icon = "🟢" if str(state) == "AgentState.IDLE" else "🔄"
-                st.markdown(f"{icon} **{name.title()}**: `{state}`")
+                state = agent.state if hasattr(agent, 'state') else "IDLE"
+                
+                # Map state to icon
+                icon_map = {
+                    "idle": "🟢",
+                    "processing": "🔄",
+                    "waiting": "⏳",
+                    "completed": "✅",
+                    "error": "❌"
+                }
+                # Convert enum to string if needed
+                state_str = str(state.value) if hasattr(state, 'value') else str(state).lower()
+                # Handle "AgentState.IDLE" string format
+                if "." in state_str: state_str = state_str.split(".")[-1].lower()
+                
+                icon = icon_map.get(state_str, "⚪")
+                st.markdown(f"{icon} **{name.title()}**: `{state_str.upper()}`")
+                
+                if state_str == "error":
+                     st.caption("⚠️ Check logs")
             
             # Show provider status
             st.markdown("#### 🔌 Active Providers")
@@ -512,8 +530,12 @@ def main():
     render_header()
     render_sidebar()
     
-    # Main content tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["💬 Chat", "🤖 Agents", "📊 Blackboard", "📚 Knowledge Hub", "🧠 Trace"])
+    # Main content tabs (UNIFIED)
+    tab1, tab2, tab3 = st.tabs([
+        "💬 Chat", 
+        "🔍 Agent Pipeline", 
+        "📚 Knowledge Hub"
+    ])
     
     with tab1:
         render_demo_queries()
@@ -521,113 +543,16 @@ def main():
         render_chat_interface()
     
     with tab2:
-        render_agent_panel()
-        
-        st.markdown("### 📋 Recent Agent Activity")
-        if st.session_state.messages:
-            last_msg = st.session_state.messages[-1]
-            if last_msg.get("role") == "assistant":
-                st.json(last_msg.get("metadata", {"status": "No recent activity"}))
-        else:
-            st.info("No agent activity yet. Start a conversation!")
-    
-    with tab3:
-        st.markdown("### 🗃️ Memory Blackboard")
-        st.caption("**Purpose**: A shared memory space where agents communicate and store information. Based on the Blackboard Pattern from the research paper.")
-        
-        # Show collection info with live stats
         if st.session_state.get("system"):
-            memory = st.session_state.system["memory"]
-            try:
-                stats = memory.get_collection_stats()
-                
-                # Collection selector
-                collections = {
-                    "episodic_memory": ("🧠 Episodic Memory", "Interaction logs and agent activity"),
-                    "knowledge_base": ("📚 Knowledge Base", "Schemes, policies, and FAQs"),
-                    "fraud_patterns": ("🔍 Fraud Patterns", "Known scam patterns"),
-                    "working_memory": ("⚡ Working Memory", "Active tasks and current state"),
-                }
-                
-                selected = st.selectbox(
-                    "Select Collection",
-                    list(collections.keys()),
-                    format_func=lambda x: f"{collections[x][0]} ({stats.get(x, {}).get('points_count', 0)} entries)"
-                )
-                
-                st.caption(collections[selected][1])
-                
-                # Fetch and display data from selected collection
-                try:
-                    # Use scroll API instead of search to avoid embedding empty string
-                    # which causes Cohere to throw "invalid request" error
-                    scroll_result = memory.client.scroll(
-                        collection_name=selected,
-                        limit=10,
-                        with_payload=True,
-                        with_vectors=False
-                    )
-                    
-                    # Convert to same format as search results
-                    results = [
-                        {
-                            "id": point.id,
-                            "score": 1.0,  # No score for scroll, use 1.0 as placeholder
-                            **point.payload
-                        }
-                        for point in scroll_result[0]  # scroll returns (points, next_page_offset)
-                    ]
-                    
-                    if results:
-                        st.markdown(f"**Showing {len(results)} most recent entries:**")
-                        
-                        for i, item in enumerate(results, 1):
-                            with st.expander(f"Entry {i} (Score: {item.get('score', 0):.3f})", expanded=(i==1)):
-                                # Show content
-                                if "content" in item:
-                                    st.markdown("**Content:**")
-                                    st.text(item["content"][:500] + "..." if len(item["content"]) > 500 else item["content"])
-                                
-                                # Show metadata
-                                st.markdown("**Metadata:**")
-                                metadata = {k: v for k, v in item.items() if k not in ["content", "vector", "score"]}
-                                st.json(metadata)
-                    else:
-                        st.info(f"No entries found in {selected}")
-                        
-                except Exception as e:
-                    st.error(f"Error fetching data: {e}")
-                    
-            except Exception as e:
-                st.error(f"Error fetching stats: {e}")
+            render_pipeline_viewer(st.session_state.system["memory"])
         else:
-            st.warning("System not initialized. Please wait...")
-
-    with tab4:
+            st.warning("System not initialized")
+            
+    with tab3:
         if st.session_state.get("system"):
             render_knowledge_hub(st.session_state.system["memory"])
         else:
             st.warning("System not initialized")
-
-    with tab5:
-        messages = st.session_state.messages
-        if messages:
-            # Find last assistant message
-            last_msg = None
-            for msg in reversed(messages):
-                if msg["role"] == "assistant":
-                    last_msg = msg
-                    break
-            
-            if last_msg and "interaction_id" in last_msg:
-                if st.session_state.get("system"):
-                    render_reasoning_trace(st.session_state.system["memory"], last_msg["interaction_id"])
-                else:
-                    st.warning("System initializing...")
-            else:
-                st.info("No traces available yet. Start a conversation.")
-        else:
-            st.info("Start a conversation to see reasoning traces.")
 
 
 if __name__ == "__main__":

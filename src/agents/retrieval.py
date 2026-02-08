@@ -55,10 +55,10 @@ class RetrievalAgent(BaseAgent):
         self.set_state(AgentState.PROCESSING)
         
         try:
-            # Search knowledge base
+            # Search knowledge base (no language filter - allows all ingested docs to be found)
             knowledge_results = await self.memory.retrieve_knowledge(
                 query=context.user_input,
-                language=context.language,
+                language=None,  # Don't filter by language; ingested docs may lack this metadata
                 limit=5
             )
             
@@ -83,7 +83,7 @@ class RetrievalAgent(BaseAgent):
             
             # Use LLM to synthesize
             context_text = "\n\n".join([
-                f"[{r.get('title', 'Document')}] (score: {r.get('score', 0):.2f})\n{r.get('content', '')[:500]}"
+                f"[{r.get('source', r.get('title', 'Document'))}] (score: {r.get('score', 0):.2f})\n{r.get('content', '')[:500]}"
                 for r in all_results[:5]
             ])
             
@@ -103,7 +103,7 @@ class RetrievalAgent(BaseAgent):
                 content=summary,
                 agent_id=self.agent_id,
                 confidence=max(r.get("score", 0) for r in all_results) if all_results else 0,
-                metadata={"sources": [r.get("title", "Unknown") for r in all_results[:3]]}
+                metadata={"sources": [r.get("source", r.get("title", "Unknown")) for r in all_results[:3]]}
             )
             
         except Exception as e:
