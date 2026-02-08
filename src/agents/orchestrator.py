@@ -236,7 +236,7 @@ class OrchestratorAgent(BaseAgent):
         )
         
         # LLMAdapter.chat() expects List[ChatMessage]
-        from sahayak.adapters.llm import ChatMessage
+        from src.adapters.llm import ChatMessage
         messages = [ChatMessage(role="user", content=prompt)]
         
         llm_response = await self.llm.chat(messages, temperature=0.1)

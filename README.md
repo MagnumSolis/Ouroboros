@@ -81,11 +81,10 @@ Before you begin, ensure you have the following installed:
 
     | Service | Variable | Requirement | Description |
     | :--- | :--- | :--- | :--- |
-    | **Groq** | `GROQ_API_KEY` | **Required** | Primary LLM provider for fast inference. |
-    | **Perplexity** | `PERPLEXITY_API_KEY` | **Required** | Online LLM for real-time information. |
-    | **Gemini** | `GEMINI_API_KEY` | **Required** | Multimodal backup model. |
-    | **Deepgram** | `DEEPGRAM_API_KEY` | Optional | For real-time high-quality speech-to-text. |
-    | **Cohere** | `COHERE_API_KEY` | Optional | For production-grade embeddings. |
+    | **Groq** | `GROQ_API_KEY` | **Required** | Primary LLM for fast reasoning and tool use. |
+    | **Perplexity** | `PERPLEXITY_API_KEY` | **Required** | Online knowledge search and RAG verification. |
+    | **Deepgram** | `DEEPGRAM_API_KEY` | Optional | Real-time Voice Agent (STT & TTS) with aura models. |
+    | **Cohere** | `COHERE_API_KEY` | Optional | Multilingual embeddings (recommended for Hindi). |
 
     > 💡 **Note**: If optional keys are missing, the system falls back to local models (Whisper for STT, SentenceTransformers for embeddings).
 

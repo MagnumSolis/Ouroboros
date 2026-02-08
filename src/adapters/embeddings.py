@@ -44,7 +44,7 @@ class CohereProvider(BaseEmbeddingProvider):
     
     def __init__(self, api_key: str, model: str = "embed-multilingual-v3.0"):
         import cohere
-        self.client = cohere.AsyncClient(api_key=api_key)
+        self.client = cohere.Client(api_key=api_key)  # Sync client
         self.model = model
         self._dimension = 1024  # Cohere v3 models use 1024
     
@@ -53,7 +53,10 @@ class CohereProvider(BaseEmbeddingProvider):
         return self._dimension
     
     async def embed(self, texts: List[str]) -> List[List[float]]:
-        response = await self.client.embed(
+        # Run sync client in thread to avoid blocking loop
+        import asyncio
+        response = await asyncio.to_thread(
+            self.client.embed,
             texts=texts,
             model=self.model,
             input_type="search_document"
@@ -62,7 +65,9 @@ class CohereProvider(BaseEmbeddingProvider):
     
     async def embed_query(self, text: str) -> List[float]:
         """Embed a query (different input_type for retrieval)"""
-        response = await self.client.embed(
+        import asyncio
+        response = await asyncio.to_thread(
+            self.client.embed,
             texts=[text],
             model=self.model,
             input_type="search_query"

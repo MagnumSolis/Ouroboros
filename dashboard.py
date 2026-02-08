@@ -16,17 +16,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import nest_asyncio
 nest_asyncio.apply()
 
-from sahayak.config import settings
-from sahayak.adapters import LLMAdapter, EmbeddingAdapter
-from sahayak.memory import MemoryManager
-from sahayak.agents import (
+from src.config import settings
+from src.adapters import LLMAdapter, EmbeddingAdapter
+from src.memory import MemoryManager
+from src.agents import (
     OrchestratorAgent, RetrievalAgent, FraudAgent, 
     PerceptionAgent, CriticAgent, AgentContext
 )
-from sahayak.adapters.audio_processor import AudioProcessor
-from sahayak.adapters.tts import TTSAdapter
-from sahayak.ui.knowledge_hub import render_knowledge_hub
-from sahayak.ui.trace_viewer import render_reasoning_trace
+from src.adapters.audio_processor import AudioProcessor
+from src.adapters.tts import TTSAdapter
+from src.ui.knowledge_hub import render_knowledge_hub
+from src.ui.trace_viewer import render_reasoning_trace
 
 # Page config
 st.set_page_config(
@@ -195,21 +195,52 @@ async def process_query(system: dict, input_data: any, modality: str = "text", l
     """Process a user query (text or audio) through the orchestrator"""
     import uuid
     
-    context = AgentContext(
-        interaction_id=str(uuid.uuid4()),
-        user_input=input_data, # Can be text or audio bytes
+    interaction_id = str(uuid.uuid4())
+    current_modality = modality
+    current_input = input_data
+    
+    # If audio, transcribe it first using perception agent
+    if current_modality == "audio" and isinstance(input_data, bytes):
+        perception_agent = system["agents"]["perception"]
+        
+        # Create context for perception agent
+        perception_context = AgentContext(
+            interaction_id=interaction_id,
+            user_input=input_data,  # Raw audio bytes
+            language=language,
+            modality="audio"
+        )
+        
+        # Process audio through perception agent
+        perception_result = await perception_agent.process(perception_context)
+        
+        # Extract transcribed text from result
+        if perception_result.success and perception_result.metadata:
+            transcription = perception_result.metadata.get("transcription", "")
+            if transcription:
+                current_input = transcription  # Now we have text
+                current_modality = "text"
+            else:
+                raise ValueError(f"Transcription empty: {perception_result.metadata}")
+        else:
+            raise ValueError(f"Transcription failed: {perception_result.content}")
+    
+    # Create context for orchestrator (should always be text now)
+    orchestrator_context = AgentContext(
+        interaction_id=interaction_id,
+        user_input=current_input,
         language=language,
-        modality=modality
+        modality=current_modality
     )
     
-    result = await system["orchestrator"].process(context)
+    result = await system["orchestrator"].process(orchestrator_context)
     
     return {
         "response": result.content,
         "success": result.success,
         "metadata": result.metadata,
         "is_fraud": result.metadata.get("is_fraud", False),
-        "interaction_id": context.interaction_id
+        "interaction_id": interaction_id  # FIX: Use local variable, not undefined 'context'
     }
 
 
@@ -236,6 +267,24 @@ def render_sidebar():
                 state = getattr(agent, 'state', 'IDLE')
                 icon = "🟢" if str(state) == "AgentState.IDLE" else "🔄"
                 st.markdown(f"{icon} **{name.title()}**: `{state}`")
+            
+            # Show provider status
+            st.markdown("#### 🔌 Active Providers")
+            
+            # LLM Providers
+            if llm := system.get("llm"):
+                providers = list(llm.providers.keys())
+                provider_str = ", ".join([p.value.title() for p in providers])
+                st.info(f"**LLM**: {provider_str}")
+            
+            # Embedding Provider
+            if memory := system.get("memory"):
+                embedder = memory.embedder
+                if embedder.is_local:
+                    provider_str = f"Local ({embedder.dimension}D)"
+                else:
+                    provider_str = f"Cohere ({embedder.dimension}D)"
+                st.info(f"**Embeddings**: {provider_str}")
         else:
             st.error("🔴 System Offline")
             if system.get("error"):
@@ -265,9 +314,13 @@ def render_sidebar():
         
         st.markdown("---")
         
-        # Clear chat
-        if st.button("🗑️ Clear Chat", use_container_width=True):
+        
+        # Clear chat UI (NOT episodic memory)
+        if st.button("🗑️ Clear Chat UI", use_container_width=True):
             st.session_state.messages = []
+            st.session_state.interaction_count = 0
+            st.session_state.fraud_alerts = 0
+            st.toast("✅ Chat UI cleared (Episodic memory preserved)")
             st.rerun()
 
 
@@ -324,11 +377,22 @@ def render_chat_interface():
     # Text Input
     prompt = st.chat_input("आपका प्रश्न / Your question...")
     
+    # Check if demo query was clicked
+    if st.session_state.get("demo_query"):
+        prompt = st.session_state.demo_query
+        st.session_state.demo_query = None  # Clear after using
+    
     if prompt or audio_val:
         # Determine input type
-        user_content = prompt if prompt else "🎤 Audio Message"
-        input_data = prompt if prompt else audio_val
-        modality = "text" if prompt else "audio"
+        if prompt:
+            user_content = prompt
+            input_data = prompt
+            modality = "text"
+        else:
+            # For audio, we need to read the bytes from the UploadedFile
+            user_content = "🎤 Audio Message"
+            input_data = audio_val.read()  # FIX: Read bytes from UploadedFile
+            modality = "audio"
 
         # Add user message
         st.session_state.messages.append({"role": "user", "content": user_content})
@@ -417,10 +481,12 @@ def render_demo_queries():
         ("💰 Mudra Loan", "MUDRA loan के लिए कैसे apply करें?"),
     ]
     
-    cols = st.columns(5)
+    cols = st.columns(len(examples))
     for i, (label, query) in enumerate(examples):
         with cols[i]:
-            if st.button(label, use_container_width=True, key=f"demo_{i}"):
+            # Use session state to store clicked query instead of direct processing
+            if st.button(label, key=f"demo_{i}", use_container_width=True):
+                # Set query in session state instead of triggering rerun
                 st.session_state.demo_query = query
                 st.rerun()
 
@@ -467,25 +533,71 @@ def main():
     
     with tab3:
         st.markdown("### 🗃️ Memory Blackboard")
+        st.caption("**Purpose**: A shared memory space where agents communicate and store information. Based on the Blackboard Pattern from the research paper.")
         
         # Show collection info with live stats
         if st.session_state.get("system"):
             memory = st.session_state.system["memory"]
             try:
                 stats = memory.get_collection_stats()
-                cols = st.columns(4)
-                collections = [
-                    ("episodic_memory", "🧠", "Episodic Memory", "Interaction logs"),
-                    ("knowledge_base", "📚", "Knowledge Base", "Schemes & policies"),
-                    ("fraud_patterns", "🔍", "Fraud Patterns", "Scam patterns"),
-                    ("working_memory", "⚡", "Working Memory", "Active tasks"),
-                ]
                 
-                for i, (name, icon, label, desc) in enumerate(collections):
-                    with cols[i]:
-                        count = stats.get(name, {}).get("points_count", 0)
-                        st.metric(f"{icon} {label}", f"{count} entries")
-                        st.button(f"↑ {desc}", key=f"btn_{name}")
+                # Collection selector
+                collections = {
+                    "episodic_memory": ("🧠 Episodic Memory", "Interaction logs and agent activity"),
+                    "knowledge_base": ("📚 Knowledge Base", "Schemes, policies, and FAQs"),
+                    "fraud_patterns": ("🔍 Fraud Patterns", "Known scam patterns"),
+                    "working_memory": ("⚡ Working Memory", "Active tasks and current state"),
+                }
+                
+                selected = st.selectbox(
+                    "Select Collection",
+                    list(collections.keys()),
+                    format_func=lambda x: f"{collections[x][0]} ({stats.get(x, {}).get('points_count', 0)} entries)"
+                )
+                
+                st.caption(collections[selected][1])
+                
+                # Fetch and display data from selected collection
+                try:
+                    # Use scroll API instead of search to avoid embedding empty string
+                    # which causes Cohere to throw "invalid request" error
+                    scroll_result = memory.client.scroll(
+                        collection_name=selected,
+                        limit=10,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                    
+                    # Convert to same format as search results
+                    results = [
+                        {
+                            "id": point.id,
+                            "score": 1.0,  # No score for scroll, use 1.0 as placeholder
+                            **point.payload
+                        }
+                        for point in scroll_result[0]  # scroll returns (points, next_page_offset)
+                    ]
+                    
+                    if results:
+                        st.markdown(f"**Showing {len(results)} most recent entries:**")
+                        
+                        for i, item in enumerate(results, 1):
+                            with st.expander(f"Entry {i} (Score: {item.get('score', 0):.3f})", expanded=(i==1)):
+                                # Show content
+                                if "content" in item:
+                                    st.markdown("**Content:**")
+                                    st.text(item["content"][:500] + "..." if len(item["content"]) > 500 else item["content"])
+                                
+                                # Show metadata
+                                st.markdown("**Metadata:**")
+                                metadata = {k: v for k, v in item.items() if k not in ["content", "vector", "score"]}
+                                st.json(metadata)
+                    else:
+                        st.info(f"No entries found in {selected}")
+                        
+                except Exception as e:
+                    st.error(f"Error fetching data: {e}")
+                    
             except Exception as e:
                 st.error(f"Error fetching stats: {e}")
         else:

@@ -47,7 +47,7 @@ def load_audio_dataset(directory: Path, label: str):
     labels = []
     
     # We need EmotionAdapter to use its feature extractor
-    from sahayak.adapters.emotion import EmotionAdapter
+    from src.adapters.emotion import EmotionAdapter
     adapter = EmotionAdapter()
     
     logger.info(f"Loading files from {directory} with label '{label}'...")

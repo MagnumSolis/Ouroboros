@@ -3,7 +3,7 @@ Base Agent - Foundation for all Sahayak agents
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,7 +28,7 @@ class AgentState(str, Enum):
 class AgentContext:
     """Context passed between agents"""
     interaction_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    user_input: str = ""
+    user_input: Union[str, bytes] = ""  # str for text, bytes for audio/image
     language: str = "en"
     modality: str = "text"  # text, audio, image
     metadata: Dict[str, Any] = field(default_factory=dict)

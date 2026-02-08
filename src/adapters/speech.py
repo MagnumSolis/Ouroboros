@@ -49,8 +49,12 @@ class DeepgramProvider(BaseSpeechProvider):
     """Deepgram API provider - Real-time, accurate STT"""
     
     def __init__(self, api_key: str):
-        from deepgram import DeepgramClient
-        self.client = DeepgramClient(api_key)
+        try:
+            from deepgram import DeepgramClient
+            # Note: Using older SDK version without DeepgramClientOptions
+            self.client = DeepgramClient(api_key)
+        except Exception as e:
+            raise ImportError(f"Failed to initialize Deepgram: {e}")
     
     async def transcribe(
         self,
@@ -133,13 +137,15 @@ class WhisperProvider(BaseSpeechProvider):
             audio_path = str(audio)
         
         try:
-            # Run transcription in thread pool (Whisper is CPU-intensive)
-            result = await asyncio.to_thread(
-                self.model.transcribe,
+            # Run transcription synchronously to avoid event loop issues in Streamlit
+            # Note: This blocks the thread but is more reliable
+            logger.debug(f"Whisper transcribing: {audio_path}")
+            result = self.model.transcribe(
                 audio_path,
                 language=language,
                 verbose=False
             )
+            logger.debug(f"Whisper result: {result['text'][:100]}...")
             
             return TranscriptionResult(
                 text=result["text"].strip(),
@@ -150,6 +156,9 @@ class WhisperProvider(BaseSpeechProvider):
                     for seg in result.get("segments", [])
                 ]
             )
+        except Exception as e:
+            logger.error(f"Whisper transcription error: {e}")
+            raise
         finally:
             if temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)

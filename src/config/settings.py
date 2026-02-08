@@ -24,10 +24,6 @@ class Settings(BaseSettings):
     groq_api_key: Optional[str] = None
     groq_model: str = "llama-3.3-70b-versatile"
     
-    # Google Gemini - Multimodal backup
-    gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-1.5-flash"
-    
     # Perplexity - Primary for Demo (Online)
     perplexity_api_key: Optional[str] = None
     perplexity_model: str = "sonar"
@@ -48,11 +44,12 @@ class Settings(BaseSettings):
     local_embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     
     # =========================================================================
-    # Speech-to-Text
+    # Speech-to-Text & Voice Agent
     # =========================================================================
     
-    # Deepgram - Real-time STT (optional, falls back to Whisper)
+    # Deepgram - Real-time STT & Voice Agent
     deepgram_api_key: Optional[str] = None
+    deepgram_voice_model: str = "aura-asteria-en"
     
     # Whisper - Local STT
     whisper_model: str = "base"  # tiny, base, small, medium, large
@@ -81,11 +78,6 @@ class Settings(BaseSettings):
     def has_groq(self) -> bool:
         """Check if Groq API is configured"""
         return bool(self.groq_api_key)
-    
-    @property
-    def has_gemini(self) -> bool:
-        """Check if Gemini API is configured"""
-        return bool(self.gemini_api_key)
 
     @property
     def has_perplexity(self) -> bool:

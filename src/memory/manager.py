@@ -16,6 +16,12 @@ from qdrant_client.models import (
     SearchRequest,
     UpdateStatus,
     QueryResponse,
+    RecommendQuery,
+    RecommendInput,
+    RecommendStrategy,
+    DiscoverQuery,
+    DiscoverInput,
+    ContextPair,
 )
 from loguru import logger
 try:
@@ -164,7 +170,7 @@ class MemoryManager:
         doc_id = id or str(uuid.uuid4())
         
         # Generate embedding
-        vector = await self.embedder.embed_single(content)
+        vector = await self.embedder.embed_query(content)
         
         # Store in Qdrant
         self.client.upsert(
@@ -230,6 +236,88 @@ class MemoryManager:
             }
             for hit in results
         ]
+        
+    async def recommend_similar(
+        self,
+        collection: str,
+        positive_ids: List[str],
+        negative_ids: List[str] = [],
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Recommend similar items using Qdrant Recommendation API
+        Useful for: "Show me schemes similar to PMJDY"
+        """
+        try:
+            results = self.client.query_points(
+                collection_name=collection,
+                query=RecommendQuery(
+                    recommend=RecommendInput(
+                        positive=positive_ids,
+                        negative=negative_ids,
+                        strategy=RecommendStrategy.AVERAGE_VECTOR,
+                    )
+                ),
+                limit=limit,
+            ).points
+            
+            return [
+                {
+                    "id": hit.id,
+                    "score": hit.score,
+                    **hit.payload
+                }
+                for hit in results
+            ]
+        except Exception as e:
+            logger.error(f"Recommendation failed: {e}")
+            return []
+
+    async def discover_patterns(
+        self,
+        collection: str,
+        target_text: str,
+        positive_context_text: str,
+        negative_context_text: str,
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Explore patterns using Qdrant Discovery API
+        Useful for: "Find fraud patterns like 'OTP' but not 'Lottery'"
+        """
+        try:
+            # Embed all components
+            target_vector = await self.embedder.embed_query(target_text)
+            pos_vector = await self.embedder.embed_query(positive_context_text)
+            neg_vector = await self.embedder.embed_query(negative_context_text)
+            
+            results = self.client.query_points(
+                collection_name=collection,
+                query=DiscoverQuery(
+                    discover=DiscoverInput(
+                        target=target_vector,
+                        context=[
+                            ContextPair(
+                                positive=pos_vector,
+                                negative=neg_vector
+                            )
+                        ]
+                    )
+                ),
+                limit=limit,
+            ).points
+            
+            return [
+                {
+                    "id": hit.id,
+                    "score": hit.score,
+                    **hit.payload
+                }
+                for hit in results
+            ]
+        except Exception as e:
+            logger.error(f"Discovery search failed: {e}")
+            return []
     
     async def get_by_id(
         self,

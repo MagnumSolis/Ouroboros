@@ -14,8 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 load_dotenv()
 
-from sahayak.config import settings
-from sahayak.adapters import LLMAdapter, EmbeddingAdapter, ChatMessage
+from src.config import settings
+from src.adapters import LLMAdapter, EmbeddingAdapter, ChatMessage, LLMProvider
 
 
 async def test_llm():
@@ -26,14 +26,19 @@ async def test_llm():
     
     adapter = LLMAdapter()
     
-    print(f"Available providers: {adapter.available_providers}")
+    # Check configured providers
+    print(f"Perplexity configured: {settings.has_perplexity}")
+    print(f"Groq configured: {settings.has_groq}")
+    print(f"OpenRouter configured: {settings.has_openrouter}")
     
-    if not adapter.available_providers:
-        print("❌ No LLM providers configured!")
-        print("   Set GROQ_API_KEY or GEMINI_API_KEY in .env")
+    if not (settings.has_groq or settings.has_perplexity):
+        print("❌ No primary LLM providers configured!")
+        print("   Set GROQ_API_KEY or PERPLEXITY_API_KEY in .env")
         return False
     
     try:
+        # Test Simple Chat (uses default priority)
+        print("\nSending query...")
         response = await adapter.simple_chat(
             prompt="Say 'Hello from Sahayak!' in exactly 5 words.",
             system_prompt="You are a helpful assistant. Be concise."
@@ -53,14 +58,21 @@ async def test_embeddings():
     
     adapter = EmbeddingAdapter()
     
-    print(f"Provider: {adapter.provider_type}")
+    # Infer provider type from private attribute or implementation
+    if hasattr(adapter, 'provider') and hasattr(adapter.provider, 'model'):
+        print(f"Provider Model: {adapter.provider.model}")
     print(f"Dimension: {adapter.dimension}")
-    print(f"Is local: {adapter.is_local}")
+    
+    if not settings.has_cohere:
+        print("⚠️  WARNING: COHERE_API_KEY not found. Using Local fallback.")
+        print("   To test Cohere embeddings, add COHERE_API_KEY to .env")
+    else:
+        print(f"✅ Using Cohere Embeddings")
     
     try:
         # Test single embedding
         text = "Financial fraud detection system"
-        embedding = await adapter.embed_single(text)
+        embedding = await adapter.embed_query(text)
         print(f"✅ Embedded text: '{text[:30]}...'")
         print(f"   Vector shape: {len(embedding)} dimensions")
         print(f"   First 5 values: {embedding[:5]}")
@@ -70,8 +82,12 @@ async def test_embeddings():
         embeddings = await adapter.embed(texts)
         print(f"✅ Batch embedded {len(embeddings)} texts")
         
-        # Test similarity
-        sim = adapter.cosine_similarity(embeddings[0], embeddings[1])
+        # Test similarity (Manual Calculation)
+        import numpy as np
+        def cosine_similarity(v1, v2):
+            return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+            
+        sim = cosine_similarity(embeddings[0], embeddings[1])
         print(f"   Similarity between '{texts[0]}' and '{texts[1]}': {sim:.4f}")
         
         return True
@@ -87,7 +103,7 @@ async def test_config():
     print("=" * 50)
     
     print(f"Groq configured: {settings.has_groq}")
-    print(f"Gemini configured: {settings.has_gemini}")
+    print(f"Perplexity configured: {settings.has_perplexity}")
     print(f"Cohere configured: {settings.has_cohere}")
     print(f"Deepgram configured: {settings.has_deepgram}")
     print(f"Qdrant URL: {settings.qdrant_url}")
