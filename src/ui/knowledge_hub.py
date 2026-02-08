@@ -71,22 +71,26 @@ def render_knowledge_hub(memory):
 
     st.divider()
     
-    # Document Browser (Mockup for now as we can't easily query all docs without scroll API)
+    # Document Browser - Use scroll to get ALL recent docs
     st.subheader("Recent Knowledge Entries")
     try:
-        # Just search for * to get some docs
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        recent = loop.run_until_complete(
-            memory.search("knowledge_base", "scheme", limit=5)
+        # Use scroll API to get actual recent entries (not semantic search)
+        scroll_result, _ = memory.client.scroll(
+            collection_name="knowledge_base",
+            limit=10,
+            with_payload=True
         )
-        loop.close()
         
-        for doc in recent:
-            with st.expander(f"📄 {doc.get('source', 'Unknown')} (Score: {doc.get('score', 0):.2f})"):
-                st.write(doc.get("content", "")[:500] + "...")
-                st.json(doc)
+        if scroll_result:
+            for point in scroll_result:
+                payload = point.payload or {}
+                source = payload.get('source', payload.get('original_name', 'Unknown'))
+                with st.expander(f"📄 {source}"):
+                    content = payload.get("content", "")[:500]
+                    st.write(content + ("..." if len(payload.get("content", "")) > 500 else ""))
+                    st.caption(f"Language: {payload.get('language', 'N/A')} | Chunks: {payload.get('total_chunks', 1)}")
+        else:
+            st.info("No documents in knowledge base yet. Upload some files above!")
                 
     except Exception as e:
-        st.warning(f"No documents found or error: {e}")
+        st.warning(f"Could not fetch entries: {e}")
