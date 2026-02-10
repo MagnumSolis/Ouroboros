@@ -402,15 +402,30 @@ def render_chat_interface():
     
     if prompt or audio_val:
         # Determine input type
+        should_process = False
+        user_content = None
+        input_data = None
+        modality = None
+        
         if prompt:
             user_content = prompt
             input_data = prompt
             modality = "text"
-        else:
-            # For audio, we need to read the bytes from the UploadedFile
-            user_content = "🎤 Audio Message"
-            input_data = audio_val.read()  # FIX: Read bytes from UploadedFile
-            modality = "audio"
+            should_process = True
+        elif audio_val:
+            # For audio, check if it's already processed
+            audio_bytes = audio_val.getvalue()
+            audio_hash = hash(audio_bytes)
+            
+            if audio_hash != st.session_state.get("last_audio_hash"):
+                user_content = "🎤 Audio Message"
+                input_data = audio_bytes
+                modality = "audio"
+                st.session_state.last_audio_hash = audio_hash
+                should_process = True
+        
+        if not should_process:
+            return
 
         # Add user message
         st.session_state.messages.append({"role": "user", "content": user_content})

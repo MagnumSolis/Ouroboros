@@ -66,9 +66,11 @@ class BaseLLMProvider(ABC):
 class GroqProvider(BaseLLMProvider):
     """Groq API provider - Ultra-fast inference for Reasoning & Tool Use"""
     
+    
     def __init__(self, api_key: str, model: str = "llama-3.3-70b-versatile"):
         from groq import AsyncGroq
-        self.client = AsyncGroq(api_key=api_key)
+        # Increase timeout to 120s for stability during demo
+        self.client = AsyncGroq(api_key=api_key, timeout=120.0)
         self.model = model
     
     async def chat(
@@ -139,7 +141,8 @@ class PerplexityProvider(BaseLLMProvider):
         self.api_key = api_key
         self.model = model
         self.base_url = "https://api.perplexity.ai"
-        self.client = httpx.AsyncClient(timeout=60.0)
+        # Increase timeout to 120s
+        self.client = httpx.AsyncClient(timeout=120.0)
     
     async def chat(
         self,
@@ -202,7 +205,8 @@ class OpenRouterProvider(BaseLLMProvider):
         self.api_key = api_key
         self.model = model
         self.base_url = "https://openrouter.ai/api/v1"
-        self.client = httpx.AsyncClient(timeout=60.0)
+        # Increase timeout to 120s
+        self.client = httpx.AsyncClient(timeout=120.0)
     
     async def chat(
         self,
