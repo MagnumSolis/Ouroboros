@@ -428,30 +428,36 @@ If emotion is 'fear' or 'angry', prioritize CHECK_FRAUD and raise urgency."""
                 if context_summary:
                     knowledge_context.append(f"Past context:\n{context_summary}")
         
+        # Get language from plan or context
+        lang_code = plan.get('language', context.language)
+        lang_map = {"hi": "Hindi", "en": "English", "mixed": "Hinglish (Hindi written in English/Hindi mix)"}
+        target_lang = lang_map.get(lang_code, lang_code)
+
         # Generate final response
         prompt = f"""Generate a helpful response for the user.
-
-User Query: {context.user_input}
-Language to respond in: {plan.get('language', 'en')}
-Urgency: {plan.get('urgency', 'low')}
-
-{"⚠️ FRAUD ALERT: " + fraud_alert if fraud_alert else ""}
-
-Relevant Information:
-{chr(10).join(knowledge_context) if knowledge_context else "No specific information found."}
-
-Instructions:
-- If there's a fraud alert, PRIORITIZE warning the user clearly
-- Use the appropriate language (Hindi/English/mixed)
-- Be culturally appropriate and respectful
-- For financial info, mention that user should verify with official sources
-- Be concise but complete"""
+        
+        User Query: {context.user_input}
+        TARGET LANGUAGE: {target_lang} (Strictly follow this)
+        Urgency: {plan.get('urgency', 'low')}
+        
+        {"⚠️ FRAUD ALERT: " + fraud_alert if fraud_alert else ""}
+        
+        Relevant Information:
+        {chr(10).join(knowledge_context) if knowledge_context else "No specific information found."}
+        
+        Instructions:
+        1. Responose MUST be in {target_lang}.
+        2. If there's a fraud alert, explain WHY it is fraud in simple {target_lang}.
+        3. Be culturally appropriate and respectful.
+        4. For financial info, mention that user should verify with official sources.
+        5. Be concise but complete."""
 
         response = await self.think(prompt, context, temperature=0.7)
         
-        # Prepend fraud warning if detected
+        # Prepend fraud warning if detected (Multilingual safety)
         if fraud_alert:
-            response = f"⚠️ **सावधान / Warning**: {fraud_alert}\n\n{response}"
+            prefix = "⚠️ **Potential Fraud / संभावित धोखाधड़ी**"
+            response = f"{prefix}\n\n{response}"
         
         return response
     
